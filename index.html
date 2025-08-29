@@ -1,1135 +1,559 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Real-Time Music Visualizer + DJ</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Real-Time Music Visualizer + DJ (with Track Displays & Recordable Pads)</title>
 
-  <!-- Three.js (r128) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <!-- OrbitControls for basic camera movement -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/controls/OrbitControls.min.js"></script>
-  <!-- Cannon.js (optional physics) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
-  <!-- Font Awesome for UI icons -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet"/>
+<!-- Three.js (r128) + OrbitControls -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/controls/OrbitControls.min.js"></script>
+<!-- Cannon.js (physics) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+<!-- Font Awesome -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet"/>
 
-  <style>
-    /* =========================
-       GLOBAL THEME + LAYOUT
-       ========================= */
-    :root{
-      --bg:#0a0b0f;            /* base background */
-      --panel:#11131a;         /* UI panel background */
-      --panel-2:#0f1117;       /* secondary surface */
-      --fg:#e6e9ef;            /* primary text */
-      --muted:#7f8aa3;         /* muted text */
-      --accent:#00e5ff;        /* cyan accent */
-      --accent-2:#7c4dff;      /* purple accent */
-      --good:#2bd576;          /* green accent */
-      --warn:#ffb020;          /* amber accent */
-      --danger:#ff5577;        /* red accent */
-      --grid-gap:1rem;
-      --radius:14px;
-      --shadow:0 10px 30px rgba(0,0,0,0.35);
-    }
-    *{box-sizing:border-box}
-    html,body{
-      margin:0;
-      height:100%;
-      color:var(--fg);
-      background:var(--bg);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-      -webkit-font-smoothing:antialiased;
-      -moz-osx-font-smoothing:grayscale;
-      overflow:hidden; /* the 3D canvas sits full screen */
-    }
-
-    /* 3D canvas fills screen, UI floats above it */
-    #stage{
-      position:fixed;
-      inset:0;
-      z-index:0;
-      background: radial-gradient(1200px 600px at 50% 100%, rgba(0,229,255,0.12), transparent 70%),
-                  radial-gradient(900px 900px at 10% 10%, rgba(124,77,255,0.10), transparent 60%),
-                  var(--bg);
-    }
-
-    /* Top utility bar */
-    .topbar{
-      position:fixed;
-      z-index:2;
-      top:0;
-      left:0;
-      right:0;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:1rem;
-      padding:.8rem 1rem;
-      backdrop-filter: blur(10px);
-      background: linear-gradient(to right, rgba(17,19,26,0.75), rgba(17,19,26,0.55));
-      border-bottom:1px solid rgba(255,255,255,0.06);
-    }
-    .brand{
-      display:flex;
-      align-items:center;
-      gap:.75rem;
-      font-weight:700;
-      letter-spacing:.3px;
-    }
-    .brand .dot{
-      width:10px;height:10px;border-radius:50%;
-      background: conic-gradient(from 0deg, var(--accent), var(--accent-2));
-      box-shadow:0 0 12px rgba(0,229,255,.6);
-    }
-    .top-actions{display:flex;align-items:center;gap:.6rem}
-    .btn{
-      display:inline-flex;align-items:center;gap:.5rem;
-      padding:.55rem .8rem;border-radius:10px;border:1px solid rgba(255,255,255,0.08);
-      background: linear-gradient(180deg, rgba(20,22,29,.9), rgba(14,16,22,.9));
-      color:var(--fg);cursor:pointer;box-shadow:var(--shadow);
-      transition:transform .12s ease, box-shadow .12s ease, background .2s ease;
-      user-select:none;
-    }
-    .btn:hover{transform:translateY(-1px)}
-    .btn:active{transform:translateY(0)}
-    .btn.primary{
-      border-color: rgba(0,229,255,.25);
-      background: linear-gradient(180deg, rgba(0,229,255,.18), rgba(0,229,255,.05));
-      box-shadow: 0 8px 26px rgba(0,229,255,.2);
-    }
-    .btn.toggle.on{outline:2px solid var(--accent)}
-
-    /* Main UI shell */
-    .shell{
-      position:fixed;inset:56px 0 0 0; /* under topbar */
-      z-index:1;
-      display:grid;
-      grid-template-columns: 1fr minmax(260px, 520px) 1fr;
-      gap: var(--grid-gap);
-      padding: var(--grid-gap);
-      pointer-events:none; /* allow camera orbit on empty areas */
-    }
-    .panel{
-      pointer-events:auto; /* UI interactive */
-      background: linear-gradient(160deg, rgba(20,22,29,.92), rgba(15,17,24,.92));
-      border:1px solid rgba(255,255,255,0.06);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      padding: .9rem;
-      min-height: 280px;
-    }
-
-    /* Turntables */
-    .deck{
-      display:grid;
-      grid-template-rows: auto 1fr auto;
-      gap:.75rem;
-    }
-    .plabel{
-      display:flex;align-items:center;justify-content:space-between;
-      font-size:.9rem;color:var(--muted)
-    }
-    .disc-wrap{
-      aspect-ratio:1/1;
-      border-radius:50%;
-      background: radial-gradient(120px 120px at 50% 50%, rgba(255,255,255,0.06), rgba(255,255,255,0.0)),
-                  conic-gradient(from 0deg, rgba(124,77,255,.12), rgba(0,229,255,.12), rgba(124,77,255,.12));
-      border:1px solid rgba(255,255,255,.06);
-      position:relative;
-      overflow:hidden;
-      cursor:grab;
-    }
-    .disc-wrap:active{cursor:grabbing}
-    .disc {
-      position:absolute;inset:6%;
-      border-radius:50%;
-      background:
-        radial-gradient(60px 60px at 50% 50%, rgba(255,255,255,0.08), rgba(255,255,255,0) 60%),
-        repeating-conic-gradient(from 0deg, rgba(255,255,255,0.06) 0 6deg, rgba(255,255,255,0) 6deg 12deg);
-      border:1px solid rgba(255,255,255,.08);
-      filter: drop-shadow(0 10px 20px rgba(0,0,0,.5));
-      transform: rotate(0deg);
-      transition: box-shadow .25s ease;
-    }
-    .spindle{
-      position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-      width:14%;height:14%;border-radius:50%;
-      background:radial-gradient(circle at 30% 30%, #fff, #ddd 45%, #666 60%, #222 80%);
-      box-shadow: inset 0 0 10px rgba(0,0,0,.6);
-      border:2px solid #111;
-    }
-    .deck-controls{
-      display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap
-    }
-    .deck-controls .btn{flex:1 1 90px;justify-content:center}
-
-    /* Mixer center panel */
-    .mixer{
-      display:grid;grid-template-rows:auto auto 1fr;gap: .9rem;
-    }
-    .xfader{
-      padding:.8rem;border-radius:12px;background:var(--panel-2);
-      border:1px solid rgba(255,255,255,.06);
-    }
-    .xfader label{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:.9rem}
-    .xfader input[type="range"]{width:100%}
-    input[type="range"]{
-      -webkit-appearance:none;appearance:none;height:6px;border-radius:999px;
-      background:linear-gradient(90deg, var(--accent), var(--accent-2));
-      outline:none;opacity:.95;box-shadow: inset 0 0 10px rgba(0,0,0,.5);
-    }
-    input[type="range"]::-webkit-slider-thumb{
-      -webkit-appearance:none;appearance:none;width:22px;height:22px;border-radius:50%;
-      border:2px solid rgba(255,255,255,.8);
-      background: radial-gradient(circle at 30% 30%, #fff, #dff, #5ff);
-      box-shadow:0 4px 16px rgba(0,229,255,.45);
-      cursor:pointer;
-    }
-    .pads{
-      display:grid;grid-template-columns: repeat(3, minmax(0,1fr));gap:.75rem
-    }
-    .pad{
-      position:relative;
-      aspect-ratio:1/1;border-radius:12px;cursor:pointer;
-      background: linear-gradient(160deg, rgba(0,229,255,.08), rgba(124,77,255,.08));
-      border:1px solid rgba(255,255,255,.08);
-      display:flex;align-items:center;justify-content:center;
-      font-weight:700;letter-spacing:.4px;color:#def;
-      box-shadow:var(--shadow);
-      transition: transform .06s ease, background .2s ease, border-color .2s ease;
-      user-select:none;
-    }
-    .pad:active{transform:translateY(1px)}
-    .pad small{
-      position:absolute;bottom:6px;left:8px;color:var(--muted);font-size:.7rem
-    }
-
-    /* Educational overlay panel */
-    .edu{
-      position:fixed;right:1rem;bottom:1rem;z-index:3;max-width:min(520px, 92vw);
-      display:none; /* toggled by button */
-      background: linear-gradient(180deg, rgba(18,20,28,.95), rgba(12,14,20,.95));
-      border:1px solid rgba(255,255,255,.08);
-      border-radius:14px;box-shadow: var(--shadow);
-      padding:1rem;
-    }
-    .edu.on{display:block}
-    .edu h3{margin:.2rem 0 .6rem 0;font-size:1.05rem}
-    .edu .scroll{
-      max-height:40vh;overflow:auto;padding-right:.2rem;
-      border-top:1px dashed rgba(255,255,255,.08);margin-top:.5rem
-    }
-    .edu .msg{font-size:.9rem;color:#cfe;opacity:.95;margin:.6rem 0}
-    .edu code{background:#0f1320;border:1px solid rgba(255,255,255,.07);padding:.08rem .35rem;border-radius:6px}
-
-    /* Footer helper on small screens */
-    .footer-tip{
-      position:fixed;left:0;right:0;bottom:0;z-index:2;
-      text-align:center;color:var(--muted);
-      padding:.35rem .75rem;font-size:.85rem;
-      background:linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,.35));
-      pointer-events:none;
-    }
-
-    /* Responsive: stack columns on narrow screens */
-    @media (max-width: 980px){
-      .shell{
-        grid-template-columns: 1fr;
-        grid-auto-rows:auto;
-        overflow:auto;
-      }
-      .panel{min-height:unset}
-    }
-  </style>
+<style>
+  :root{
+    --bg:#0a0b0f;--panel:#11131a;--panel2:#0f1117;--fg:#e6e9ef;--muted:#8fa0b8;
+    --a:#00e5ff;--b:#7c4dff;--ok:#2bd576;--warn:#ffb020;--bad:#ff5577;
+    --r:14px;--gap:1rem;--shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  #stage{position:fixed;inset:0;z-index:0;background:radial-gradient(1200px 600px at 50% 100%, rgba(0,229,255,.12), transparent 70%),radial-gradient(900px 900px at 10% 10%, rgba(124,77,255,.10), transparent 60%),var(--bg)}
+  .topbar{position:fixed;z-index:3;left:0;right:0;top:0;display:flex;align-items:center;justify-content:space-between;padding:.7rem 1rem;background:linear-gradient(0deg, rgba(17,19,26,.6), rgba(17,19,26,.8));backdrop-filter:blur(8px);border-bottom:1px solid rgba(255,255,255,.06)}
+  .brand{display:flex;gap:.6rem;align-items:center;font-weight:700}
+  .brand .dot{width:10px;height:10px;border-radius:50%;background:conic-gradient(var(--a),var(--b));box-shadow:0 0 12px rgba(0,229,255,.6)}
+  .btn{display:inline-flex;gap:.5rem;align-items:center;padding:.5rem .8rem;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg, rgba(20,22,29,.9), rgba(14,16,22,.9));color:var(--fg);cursor:pointer;box-shadow:var(--shadow)}
+  .btn.primary{border-color:rgba(0,229,255,.25);background:linear-gradient(180deg, rgba(0,229,255,.18), rgba(0,229,255,.05));box-shadow:0 8px 26px rgba(0,229,255,.2)}
+  .btn.toggle.on{outline:2px solid var(--a)}
+  .shell{position:fixed;z-index:2;inset:56px 0 0 0;display:grid;grid-template-columns:1fr minmax(290px,560px) 1fr;gap:var(--gap);padding:var(--gap);pointer-events:none}
+  .panel{pointer-events:auto;background:linear-gradient(160deg, rgba(20,22,29,.92), rgba(15,17,24,.92));border:1px solid rgba(255,255,255,.06);border-radius:var(--r);box-shadow:var(--shadow);padding:.9rem}
+  .deck{display:grid;grid-template-rows:auto auto 1fr auto;gap:.6rem}
+  .plabel{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:.9rem}
+  .display{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;background:var(--panel2);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:.6rem}
+  .screen{grid-column:span 2;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;background:linear-gradient(180deg,#0c111a,#0a0d15);border:1px solid rgba(0,229,255,.15);border-radius:10px;padding:.5rem}
+  .cell{min-height:40px;border:1px solid rgba(255,255,255,.06);border-radius:8px;display:flex;flex-direction:column;justify-content:center;padding:.35rem .45rem}
+  .cell b{font-size:.85rem;color:#cfe}
+  .cell span{font-size:.8rem;color:var(--muted)}
+  .knob{display:flex;align-items:center;gap:.4rem}
+  .disc-wrap{aspect-ratio:1/1;border-radius:50%;background:radial-gradient(120px 120px at 50% 50%, rgba(255,255,255,.06), rgba(255,255,255,0)),conic-gradient(rgba(124,77,255,.12),rgba(0,229,255,.12),rgba(124,77,255,.12));border:1px solid rgba(255,255,255,.06);position:relative;overflow:hidden;cursor:grab}
+  .disc-wrap:active{cursor:grabbing}
+  .disc{position:absolute;inset:6%;border-radius:50%;background:radial-gradient(60px 60px at 50% 50%, rgba(255,255,255,.08), rgba(255,255,255,0) 60%),repeating-conic-gradient(rgba(255,255,255,.06) 0 6deg, transparent 6deg 12deg);border:1px solid rgba(255,255,255,.08);filter:drop-shadow(0 10px 20px rgba(0,0,0,.5));transform:rotate(0deg)}
+  .spindle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:14%;height:14%;border-radius:50%;background:radial-gradient(circle at 30% 30%, #fff, #ddd 45%, #666 60%, #222 80%);border:2px solid #111}
+  .deck-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem}
+  .deck-tools{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.5rem;margin-top:.5rem}
+  .xfader{padding:.8rem;border-radius:12px;background:var(--panel2);border:1px solid rgba(255,255,255,.06)}
+  .xfader label{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:.9rem}
+  input[type="range"]{-webkit-appearance:none;appearance:none;height:6px;border-radius:999px;background:linear-gradient(90deg,var(--a),var(--b));outline:none;box-shadow:inset 0 0 10px rgba(0,0,0,.5)}
+  input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.8);background:radial-gradient(circle at 30% 30%, #fff, #dff, #5ff);box-shadow:0 4px 16px rgba(0,229,255,.45);cursor:pointer}
+  .pads{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem}
+  .pad,.upad{position:relative;aspect-ratio:1/1;border-radius:12px;cursor:pointer;background:linear-gradient(160deg, rgba(0,229,255,.08), rgba(124,77,255,.08));border:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;font-weight:700;color:#def;box-shadow:var(--shadow)}
+  .pad small,.upad small{position:absolute;bottom:6px;left:8px;color:var(--muted);font-size:.7rem}
+  .recorder{display:grid;grid-template-columns:1fr;gap:.6rem;background:var(--panel2);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:.7rem}
+  .edu{position:fixed;right:1rem;bottom:1rem;z-index:5;max-width:min(560px,92vw);display:none;background:linear-gradient(180deg, rgba(18,20,28,.95), rgba(12,14,20,.95));border:1px solid rgba(255,255,255,.08);border-radius:14px;box-shadow:var(--shadow);padding:1rem}
+  .edu.on{display:block}
+  .edu .scroll{max-height:40vh;overflow:auto;margin-top:.5rem;border-top:1px dashed rgba(255,255,255,.08);padding-top:.5rem}
+  .footer-tip{position:fixed;left:0;right:0;bottom:0;z-index:2;text-align:center;color:var(--muted);padding:.35rem .75rem;font-size:.85rem;background:linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,.35));pointer-events:none}
+  @media (max-width:980px){.shell{grid-template-columns:1fr;grid-auto-rows:auto;overflow:auto}}
+</style>
 </head>
 <body>
-  <!-- 3D stage -->
-  <canvas id="stage"></canvas>
+<canvas id="stage"></canvas>
 
-  <!-- Top bar -->
-  <div class="topbar">
-    <div class="brand">
-      <span class="dot"></span>
-      <span>Audio Visualizer + DJ</span>
-    </div>
-    <div class="top-actions">
-      <button id="audioStart" class="btn primary"><i class="fa-solid fa-bolt"></i> Init Audio</button>
-      <button id="eduToggle" class="btn toggle"><i class="fa-solid fa-graduation-cap"></i> Educational Mode</button>
-      <button id="camReset" class="btn"><i class="fa-solid fa-camera-rotate"></i> Reset View</button>
-      <a class="btn" href="#" id="recNotSupported" title="Recorder stub"><i class="fa-solid fa-record-vinyl"></i> Record</a>
-    </div>
+<!-- Topbar -->
+<div class="topbar">
+  <div class="brand"><span class="dot"></span><span>Audio Visualizer + DJ</span></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <button id="audioStart" class="btn primary"><i class="fa-solid fa-bolt"></i> Init Audio</button>
+    <button id="eduToggle" class="btn toggle"><i class="fa-solid fa-graduation-cap"></i> Educational Mode</button>
+    <button id="camReset" class="btn"><i class="fa-solid fa-camera-rotate"></i> Reset View</button>
   </div>
+</div>
 
-  <!-- Main UI -->
-  <div class="shell">
-    <!-- Deck A -->
-    <section class="panel deck" id="deckA">
-      <div class="plabel">
-        <strong>Deck A</strong>
-        <span id="deckATime">00:00</span>
-      </div>
-      <div class="disc-wrap" data-deck="A" title="Drag to scratch">
-        <div class="disc" id="discA">
-          <div class="spindle"></div>
-        </div>
-      </div>
-      <div class="deck-controls">
-        <label class="btn" title="Load audio">
-          <i class="fa-solid fa-upload"></i> Load
-          <input id="loadA" type="file" accept="audio/*" style="display:none">
-        </label>
-        <button id="playA" class="btn"><i class="fa-solid fa-play"></i> Play</button>
-        <button id="pauseA" class="btn"><i class="fa-solid fa-pause"></i> Pause</button>
-      </div>
-    </section>
+<!-- Main UI -->
+<div class="shell">
+  <!-- Deck A -->
+  <section class="panel deck" id="deckA">
+    <div class="plabel"><strong>Deck A</strong><span id="deckATime">00:00</span></div>
 
-    <!-- Mixer + Pads -->
-    <section class="panel mixer">
-      <div class="xfader">
-        <label>
-          <span>Crossfader</span>
-          <span id="xfLabel">Center</span>
-        </label>
-        <input id="xfader" type="range" min="0" max="1" step="0.001" value="0.5" />
+    <!-- DIGITAL DISPLAY + CONTROLS -->
+    <div class="display">
+      <div class="screen" id="screenA">
+        <div class="cell"><b>ELAPSED</b><span id="aElapsed">00:00</span></div>
+        <div class="cell"><b>REMAIN</b><span id="aRemain">--:--</span></div>
+        <div class="cell"><b>PITCH</b><span id="aPitch">+0.00%</span></div>
+        <div class="cell"><b>RATE</b><span id="aRate">1.00x</span></div>
       </div>
-
-      <div class="xfader" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
-        <div>
-          <label>
-            <span>Master Volume</span>
-            <span id="volLabel">0.85</span>
-          </label>
-          <input id="masterVol" type="range" min="0" max="1" step="0.001" value="0.85" />
-        </div>
-        <div>
-          <label>
-            <span>Smoothing</span>
-            <span id="smLabel">0.85</span>
-          </label>
-          <input id="smoothing" type="range" min="0" max="0.99" step="0.01" value="0.85" />
-        </div>
+      <div class="knob">
+        <span style="width:80px;color:var(--muted);font-size:.85rem">Pitch</span>
+        <input id="aPitchSlider" type="range" min="0.5" max="1.5" step="0.001" value="1">
       </div>
+      <div class="knob">
+        <span style="width:80px;color:var(--muted);font-size:.85rem">Trim</span>
+        <input id="aTrim" type="range" min="0" max="2" step="0.01" value="1">
+      </div>
+    </div>
 
+    <div class="disc-wrap" data-deck="A" title="Drag to scratch">
+      <div class="disc" id="discA"><div class="spindle"></div></div>
+    </div>
+
+    <div class="deck-controls">
+      <label class="btn" title="Load audio"><i class="fa-solid fa-upload"></i> Load
+        <input id="loadA" type="file" accept="audio/*" style="display:none">
+      </label>
+      <button id="playA" class="btn"><i class="fa-solid fa-play"></i> Play</button>
+      <button id="pauseA" class="btn"><i class="fa-solid fa-pause"></i> Pause</button>
+    </div>
+
+    <!-- Transport tools: Cue, Loop In/Out, Loop On/Off, Nudge -->
+    <div class="deck-tools">
+      <button id="aSetCue" class="btn"><i class="fa-solid fa-map-pin"></i> Set Cue</button>
+      <button id="aJumpCue" class="btn"><i class="fa-solid fa-location-arrow"></i> Jump Cue</button>
+      <button id="aLoopIn" class="btn"><i class="fa-solid fa-arrow-left"></i> In</button>
+      <button id="aLoopOut" class="btn"><i class="fa-solid fa-arrow-right"></i> Out</button>
+      <button id="aLoopToggle" class="btn"><i class="fa-solid fa-repeat"></i> Loop</button>
+      <div style="display:flex;gap:.5rem">
+        <button id="aNudgeL" class="btn"><i class="fa-solid fa-angle-left"></i></button>
+        <button id="aNudgeR" class="btn"><i class="fa-solid fa-angle-right"></i></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Mixer + Pads + Recorder -->
+  <section class="panel">
+    <div class="xfader">
+      <label><span>Crossfader</span><span id="xfLabel">Center</span></label>
+      <input id="xfader" type="range" min="0" max="1" step="0.001" value="0.5" />
+    </div>
+
+    <div class="xfader" style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-top:.7rem">
       <div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin:.2rem 0 .6rem 0;color:var(--muted)">
-          <strong>Beat Pads</strong>
-          <span style="font-size:.85rem">synth generated</span>
-        </div>
-        <div class="pads">
-          <button class="pad" data-pad="kick">KICK<small>Pad 1</small></button>
-          <button class="pad" data-pad="snare">SNARE<small>Pad 2</small></button>
-          <button class="pad" data-pad="hat">HAT<small>Pad 3</small></button>
-          <button class="pad" data-pad="clap">CLAP<small>Pad 4</small></button>
-          <button class="pad" data-pad="tom">TOM<small>Pad 5</small></button>
-          <button class="pad" data-pad="fx">FX<small>Pad 6</small></button>
-        </div>
+        <label><span>Master Volume</span><span id="volLabel">0.85</span></label>
+        <input id="masterVol" type="range" min="0" max="1" step="0.001" value="0.85" />
       </div>
-    </section>
-
-    <!-- Deck B -->
-    <section class="panel deck" id="deckB">
-      <div class="plabel">
-        <strong>Deck B</strong>
-        <span id="deckBTime">00:00</span>
+      <div>
+        <label><span>Smoothing</span><span id="smLabel">0.85</span></label>
+        <input id="smoothing" type="range" min="0" max="0.99" step="0.01" value="0.85" />
       </div>
-      <div class="disc-wrap" data-deck="B" title="Drag to scratch">
-        <div class="disc" id="discB">
-          <div class="spindle"></div>
-        </div>
-      </div>
-      <div class="deck-controls">
-        <label class="btn" title="Load audio">
-          <i class="fa-solid fa-upload"></i> Load
-          <input id="loadB" type="file" accept="audio/*" style="display:none">
-        </label>
-        <button id="playB" class="btn"><i class="fa-solid fa-play"></i> Play</button>
-        <button id="pauseB" class="btn"><i class="fa-solid fa-pause"></i> Pause</button>
-      </div>
-    </section>
-  </div>
-
-  <!-- Educational overlay -->
-  <aside id="edu" class="edu" aria-live="polite">
-    <h3><i class="fa-solid fa-graduation-cap"></i> Educational Mode</h3>
-    <div class="msg">
-      <strong>Basics</strong>: <em>Amplitude</em> is signal strength. <em>Frequency</em> is cycles per second. Bass is low freq, mids are middle, highs are treble.
-      Visualizer maps bass to building height. Pulses and color shifts respond to spectral changes.
     </div>
-    <div class="msg">
-      <strong>Audio Graph</strong>:
-      <code>DeckA/B → deckGain → crossfade → master → analyser → destination</code>.
-      Pads feed the same master so they affect visuals.
+
+    <div style="margin-top:.7rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:.2rem 0 .6rem 0;color:var(--muted)">
+        <strong>Beat Pads</strong><span style="font-size:.85rem">synth generated</span>
+      </div>
+      <div class="pads">
+        <button class="pad" data-pad="kick">KICK<small>Pad 1</small></button>
+        <button class="pad" data-pad="snare">SNARE<small>Pad 2</small></button>
+        <button class="pad" data-pad="hat">HAT<small>Pad 3</small></button>
+        <button class="pad" data-pad="clap">CLAP<small>Pad 4</small></button>
+        <button class="pad" data-pad="tom">TOM<small>Pad 5</small></button>
+        <button class="pad" data-pad="fx">FX<small>Pad 6</small></button>
+      </div>
     </div>
-    <div id="eduLog" class="scroll"></div>
-  </aside>
 
-  <div class="footer-tip">Tip: drag a turntable to scratch, move camera with mouse, toggle Educational Mode for inline explanations.</div>
+    <!-- Recorder + User Pads -->
+    <div class="recorder" style="margin-top:.8rem">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <strong>User Recorder</strong>
+        <span style="color:var(--muted);font-size:.85rem">record your own sounds and assign to pads</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+          <button id="recStart" class="btn"><i class="fa-solid fa-microphone"></i> Start</button>
+          <button id="recStop" class="btn"><i class="fa-solid fa-square"></i> Stop</button>
+          <button id="recAssign" class="btn"><i class="fa-solid fa-floppy-disk"></i> Assign</button>
+        </div>
+        <div style="display:flex;gap:.5rem;align-items:center;justify-content:flex-end">
+          <label style="color:var(--muted);font-size:.9rem">Target Pad</label>
+          <select id="recTarget" class="btn" style="padding:.35rem .6rem">
+            <option value="u1">U1</option><option value="u2">U2</option>
+            <option value="u3">U3</option><option value="u4">U4</option>
+          </select>
+        </div>
+      </div>
 
-  <script>
-    /* ==========================================================
-       REAL-TIME DJ + VISUALIZER
-       Single file. Pure HTML, CSS, JS.
-       Web Audio API for audio graph. Three.js for visuals.
-       Cannon.js used lightly for reactive physics spheres.
-       ========================================================== */
+      <div style="margin-top:.6rem;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.6rem">
+        <button class="upad" id="u1">U1<small>empty</small></button>
+        <button class="upad" id="u2">U2<small>empty</small></button>
+        <button class="upad" id="u3">U3<small>empty</small></button>
+        <button class="upad" id="u4">U4<small>empty</small></button>
+      </div>
+      <div id="recStatus" style="margin-top:.4rem;color:var(--muted);font-size:.9rem">Mic idle</div>
+    </div>
+  </section>
 
-    /* ----------------------------
-       UTILS
-       ---------------------------- */
-    const $ = sel => document.querySelector(sel);
-    const $$ = sel => Array.from(document.querySelectorAll(sel));
-    const clamp = (v,min,max)=>Math.min(max,Math.max(min,v));
-    const lerp = (a,b,t)=>a+(b-a)*t;
-    const fmtTime = sec=>{
-      if(!isFinite(sec)||sec<0) sec=0;
-      const m = Math.floor(sec/60);
-      const s = Math.floor(sec%60);
-      return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-    };
+  <!-- Deck B -->
+  <section class="panel deck" id="deckB">
+    <div class="plabel"><strong>Deck B</strong><span id="deckBTime">00:00</span></div>
 
-    /* ----------------------------
-       EDUCATIONAL MODE LOGGING
-       ---------------------------- */
-    const edu = {
-      on:false,
-      el: $('#edu'),
-      logEl: $('#eduLog'),
-      toggle(){
-        this.on = !this.on;
-        this.el.classList.toggle('on', this.on);
-        $('#eduToggle').classList.toggle('on', this.on);
-        if(this.on) this.msg('Educational mode enabled. Explanations will appear here.');
-      },
-      msg(text){
-        if(!this.on) return;
-        const div = document.createElement('div');
-        div.className='msg';
-        div.textContent = text;
-        this.logEl.appendChild(div);
-        this.logEl.scrollTop = this.logEl.scrollHeight;
+    <!-- DIGITAL DISPLAY + CONTROLS -->
+    <div class="display">
+      <div class="screen" id="screenB">
+        <div class="cell"><b>ELAPSED</b><span id="bElapsed">00:00</span></div>
+        <div class="cell"><b>REMAIN</b><span id="bRemain">--:--</span></div>
+        <div class="cell"><b>PITCH</b><span id="bPitch">+0.00%</span></div>
+        <div class="cell"><b>RATE</b><span id="bRate">1.00x</span></div>
+      </div>
+      <div class="knob">
+        <span style="width:80px;color:var(--muted);font-size:.85rem">Pitch</span>
+        <input id="bPitchSlider" type="range" min="0.5" max="1.5" step="0.001" value="1">
+      </div>
+      <div class="knob">
+        <span style="width:80px;color:var(--muted);font-size:.85rem">Trim</span>
+        <input id="bTrim" type="range" min="0" max="2" step="0.01" value="1">
+      </div>
+    </div>
+
+    <div class="disc-wrap" data-deck="B" title="Drag to scratch">
+      <div class="disc" id="discB"><div class="spindle"></div></div>
+    </div>
+
+    <div class="deck-controls">
+      <label class="btn" title="Load audio"><i class="fa-solid fa-upload"></i> Load
+        <input id="loadB" type="file" accept="audio/*" style="display:none">
+      </label>
+      <button id="playB" class="btn"><i class="fa-solid fa-play"></i> Play</button>
+      <button id="pauseB" class="btn"><i class="fa-solid fa-pause"></i> Pause</button>
+    </div>
+
+    <div class="deck-tools">
+      <button id="bSetCue" class="btn"><i class="fa-solid fa-map-pin"></i> Set Cue</button>
+      <button id="bJumpCue" class="btn"><i class="fa-solid fa-location-arrow"></i> Jump Cue</button>
+      <button id="bLoopIn" class="btn"><i class="fa-solid fa-arrow-left"></i> In</button>
+      <button id="bLoopOut" class="btn"><i class="fa-solid fa-arrow-right"></i> Out</button>
+      <button id="bLoopToggle" class="btn"><i class="fa-solid fa-repeat"></i> Loop</button>
+      <div style="display:flex;gap:.5rem">
+        <button id="bNudgeL" class="btn"><i class="fa-solid fa-angle-left"></i></button>
+        <button id="bNudgeR" class="btn"><i class="fa-solid fa-angle-right"></i></button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Educational overlay -->
+<aside id="edu" class="edu" aria-live="polite">
+  <h3><i class="fa-solid fa-graduation-cap"></i> Educational Mode</h3>
+  <div class="msg"><strong>Displays</strong>: pitch changes the playbackRate. +6% ≈ +1 semitone. Loop In/Out sets region. Cue stores a jump target.</div>
+  <div class="msg"><strong>Recorder</strong>: your microphone routes to a buffer. Assign it to U1–U4 and trigger like any pad.</div>
+  <div id="eduLog" class="scroll"></div>
+</aside>
+
+<div class="footer-tip">Save as index.html. Open in a browser. Init Audio. Load tracks. Drag platters to scratch. Record and assign sounds to user pads.</div>
+
+<script>
+/* =============================
+   CORE HELPERS
+   ============================= */
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const clamp = (v,min,max)=>Math.min(max,Math.max(min,v));
+const lerp = (a,b,t)=>a+(b-a)*t;
+const fmtTime = sec => { if(!isFinite(sec)||sec<0) sec=0; const m=Math.floor(sec/60), s=Math.floor(sec%60); return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; };
+
+/* =============================
+   EDUCATIONAL MODE
+   ============================= */
+const edu = {
+  on:false, el:$('#edu'), logEl:$('#eduLog'),
+  toggle(){ this.on=!this.on; this.el.classList.toggle('on',this.on); $('#eduToggle').classList.toggle('on',this.on); if(this.on) this.msg('Educational mode ON'); },
+  msg(t){ if(!this.on) return; const d=document.createElement('div'); d.className='msg'; d.textContent=t; this.logEl.appendChild(d); this.logEl.scrollTop=this.logEl.scrollHeight; }
+};
+$('#eduToggle').addEventListener('click',()=>edu.toggle());
+
+/* =============================
+   AUDIO GRAPH
+   ============================= */
+let audioCtx, masterGain, analyser;
+let padsGain, deckA, deckB;
+
+const state = {
+  started:false, fftSize:1024, smoothing:0.85, xf:0.5, master:0.85,
+  spectrum:new Uint8Array(512), waveform:new Float32Array(1024)
+};
+
+function initAudio(){
+  if(audioCtx) return;
+  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  masterGain = audioCtx.createGain(); masterGain.gain.value = state.master;
+  analyser = audioCtx.createAnalyser(); analyser.fftSize=state.fftSize; analyser.smoothingTimeConstant=state.smoothing;
+  state.spectrum = new Uint8Array(analyser.frequencyBinCount);
+  state.waveform = new Float32Array(analyser.fftSize);
+  padsGain = audioCtx.createGain(); padsGain.gain.value = 0.9;
+
+  deckA = makeDeck('A'); deckB = makeDeck('B');
+  deckA.gain.connect(masterGain); deckB.gain.connect(masterGain); padsGain.connect(masterGain);
+  masterGain.connect(analyser); analyser.connect(audioCtx.destination);
+  setCrossfader(0.5);
+  edu.msg(`Audio @ ${audioCtx.sampleRate} Hz. Analyser fft=${state.fftSize}.`);
+}
+$('#audioStart').addEventListener('click', async()=>{ initAudio(); await audioCtx.resume(); state.started=true; $('#audioStart').textContent='Audio Ready'; });
+
+function setCrossfader(x){
+  state.xf = x;
+  const a = Math.cos(x*0.5*Math.PI), b = Math.cos((1-x)*0.5*Math.PI);
+  if(deckA?.gain) deckA.gain.gain.value = a*a;
+  if(deckB?.gain) deckB.gain.gain.value = b*b;
+  $('#xfLabel').textContent = x<0.45?'Left':x>0.55?'Right':'Center';
+  edu.msg(`Crossfader ${x.toFixed(2)} (equal-power).`);
+}
+$('#xfader').addEventListener('input',e=>setCrossfader(parseFloat(e.target.value)));
+$('#masterVol').addEventListener('input',e=>{ const v=parseFloat(e.target.value); state.master=v; masterGain.gain.value=v; $('#volLabel').textContent=v.toFixed(2); });
+$('#smoothing').addEventListener('input',e=>{ const v=parseFloat(e.target.value); state.smoothing=v; analyser.smoothingTimeConstant=v; $('#smLabel').textContent=v.toFixed(2); });
+
+/* Deck abstraction with trim, pitch, cue, loop */
+function makeDeck(name){
+  const pre = audioCtx.createGain(); pre.gain.value = 1.0;
+  const gain = audioCtx.createGain(); gain.gain.value = 0;  // x-fader sets audible level
+  pre.connect(gain);
+  return {
+    name, buffer:null, src:null, pre, gain,
+    isPlaying:false, startedAt:0, pausedAt:0, playbackRate:1,
+    cueTime:0, loopIn:0, loopOut:0, loopOn:false,
+
+    async load(file){
+      const buf = await file.arrayBuffer(); this.buffer = await audioCtx.decodeAudioData(buf);
+      this.pausedAt=0; this.startedAt=0; this.loopIn=0; this.loopOut=this.buffer.duration; edu.msg(`${name}: loaded ${file.name} (${this.buffer.duration.toFixed(1)} s)`);
+    },
+    _spawn(){
+      if(!this.buffer) return null;
+      const s = audioCtx.createBufferSource(); s.buffer=this.buffer; s.playbackRate.value=this.playbackRate;
+      s.connect(this.pre);
+      // loop config
+      s.loop = this.loopOn;
+      s.loopStart = Math.min(this.loopIn, this.loopOut-0.01);
+      s.loopEnd   = Math.max(this.loopOut, this.loopIn+0.01);
+      this.src=s;
+      return s;
+    },
+    play(){
+      if(!this.buffer || this.isPlaying) return;
+      const s = this._spawn(); if(!s) return;
+      const offset = clamp(this.pausedAt, 0, this.buffer.duration-0.001);
+      s.start(0, offset); this.startedAt = audioCtx.currentTime - offset/this.playbackRate; this.isPlaying=true;
+    },
+    pause(){
+      if(this.src){
+        const played = (audioCtx.currentTime - this.startedAt)*this.playbackRate;
+        this.pausedAt = (played) % (this.buffer?.duration||0);
+        try{ this.src.stop(); }catch{}
+        this.src.disconnect(); this.src=null;
       }
-    };
-    $('#eduToggle').addEventListener('click', ()=>edu.toggle());
+      this.isPlaying=false;
+    },
+    setRate(r){ this.playbackRate=r; if(this.src) this.src.playbackRate.setValueAtTime(r,audioCtx.currentTime); },
+    setTrim(v){ this.pre.gain.value=v; },
+    currentTime(){
+      if(!this.buffer) return 0;
+      if(!this.isPlaying) return this.pausedAt;
+      const played = (audioCtx.currentTime - this.startedAt)*this.playbackRate;
+      return (played) % this.buffer.duration;
+    },
+    setCue(){ this.cueTime = this.currentTime(); edu.msg(`${name}: cue set @ ${this.cueTime.toFixed(2)}s`); },
+    jumpCue(){ this.pause(); this.pausedAt=this.cueTime; this.play(); },
+    setLoopIn(){ this.loopIn = this.currentTime(); edu.msg(`${name}: loop IN ${this.loopIn.toFixed(2)}s`); if(this.loopOut<=this.loopIn) this.loopOut=Math.min(this.loopIn+1, this.buffer?.duration||this.loopIn+1); this._applyLoop(); },
+    setLoopOut(){ this.loopOut = this.currentTime(); edu.msg(`${name}: loop OUT ${this.loopOut.toFixed(2)}s`); if(this.loopOut<=this.loopIn) this.loopIn=Math.max(0,this.loopOut-1); this._applyLoop(); },
+    toggleLoop(){ this.loopOn=!this.loopOn; edu.msg(`${name}: loop ${this.loopOn?'ON':'OFF'}`); this._applyLoop(); },
+    _applyLoop(){ if(this.src){ this.src.loop=this.loopOn; this.src.loopStart=Math.min(this.loopIn,this.loopOut-0.01); this.src.loopEnd=Math.max(this.loopOut,this.loopIn+0.01); } }
+  };
+}
 
-    /* ----------------------------
-       WEB AUDIO SETUP
-       ---------------------------- */
-    let audioCtx;
-    let masterGain, analyser, merger;
-    let deckA = null;
-    let deckB = null;
-    let padsGain = null;
+/* UI wiring for decks */
+function bindDeckUI(deck, ids){
+  // file + play/pause
+  $(ids.load).addEventListener('change',e=>{ const f=e.target.files[0]; if(!f) return; initAudio(); deck.load(f); });
+  $(ids.play).addEventListener('click',()=>{ initAudio(); deck.play(); });
+  $(ids.pause).addEventListener('click',()=>deck.pause());
+  // pitch + trim
+  $(ids.pitch).addEventListener('input',e=>{
+    const r=parseFloat(e.target.value); deck.setRate(r);
+    $(ids.pitchLabel).textContent = `${((r-1)*100>=0?'+':'')}${((r-1)*100).toFixed(2)}%`;
+    $(ids.rateLabel).textContent = `${r.toFixed(2)}x`;
+    edu.msg(`${deck.name}: pitch ${r.toFixed(3)}x`);
+  });
+  $(ids.trim).addEventListener('input',e=>{ const v=parseFloat(e.target.value); deck.setTrim(v); });
+  // cue + loop
+  $(ids.setCue).addEventListener('click',()=>deck.setCue());
+  $(ids.jumpCue).addEventListener('click',()=>deck.jumpCue());
+  $(ids.in).addEventListener('click',()=>deck.setLoopIn());
+  $(ids.out).addEventListener('click',()=>deck.setLoopOut());
+  $(ids.loop).addEventListener('click',()=>deck.toggleLoop());
+  // nudge: brief ± rate
+  function nudge(sign){
+    const base = parseFloat($(ids.pitch).value);
+    let target = clamp(base + sign*0.05, 0.5, 1.5);
+    deck.setRate(target); $(ids.pitch).value=target; $(ids.pitch).dispatchEvent(new Event('input'));
+    setTimeout(()=>{ deck.setRate(base); $(ids.pitch).value=base; $(ids.pitch).dispatchEvent(new Event('input')); }, 180);
+  }
+  $(ids.nudgeL).addEventListener('click',()=>nudge(-1));
+  $(ids.nudgeR).addEventListener('click',()=>nudge(1));
+}
+bindDeckUI(
+  (deckA||{}),
+  {load:'#loadA',play:'#playA',pause:'#pauseA',pitch:'#aPitchSlider',trim:'#aTrim',
+   pitchLabel:'#aPitch',rateLabel:'#aRate',setCue:'#aSetCue',jumpCue:'#aJumpCue',in:'#aLoopIn',out:'#aLoopOut',loop:'#aLoopToggle',nudgeL:'#aNudgeL',nudgeR:'#aNudgeR'}
+);
+bindDeckUI(
+  (deckB||{}),
+  {load:'#loadB',play:'#playB',pause:'#pauseB',pitch:'#bPitchSlider',trim:'#bTrim',
+   pitchLabel:'#bPitch',rateLabel:'#bRate',setCue:'#bSetCue',jumpCue:'#bJumpCue',in:'#bLoopIn',out:'#bLoopOut',loop:'#bLoopToggle',nudgeL:'#bNudgeL',nudgeR:'#bNudgeR'}
+);
 
-    // State used for UI and analysis
-    const state = {
-      started:false,
-      fftSize:1024,             // power of two. 512..2048 is good for visuals
-      smoothing:0.85,           // 0..0.99. Higher is smoother
-      xf:0.5,                   // crossfader 0..1
-      master:0.85,
-      spectrum:new Uint8Array(512),
-      waveform:new Float32Array(1024),
-      timeA:0,
-      timeB:0
-    };
+/* Scratching */
+function bindScratch(discEl, getDeck){
+  let dragging=false,lastAngle=0,lastTime=0;
+  function angle(ev){
+    const r=discEl.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2;
+    const x=(ev.touches?ev.touches[0].clientX:ev.clientX)-cx, y=(ev.touches?ev.touches[0].clientY:ev.clientY)-cy;
+    return Math.atan2(y,x);
+  }
+  function down(ev){ if(!state.started) initAudio(); dragging=true; lastAngle=angle(ev); lastTime=performance.now(); ev.preventDefault(); edu.msg('Scratch start'); }
+  function move(ev){
+    if(!dragging) return;
+    const deck=getDeck(); if(!deck) return;
+    const a=angle(ev), now=performance.now(), dt=(now-lastTime)/1000;
+    let da=a-lastAngle; if(da>Math.PI) da-=2*Math.PI; if(da<-Math.PI) da+=2*Math.PI;
+    const rate=clamp(da/dt*0.25,-3,3); deck.setRate(rate);
+    const rot=parseFloat(discEl.dataset.rot||'0'); const deg=rot+(da*180/Math.PI); discEl.style.transform=`rotate(${deg}deg)`; discEl.dataset.rot=deg;
+    lastAngle=a; lastTime=now;
+  }
+  function up(){ if(!dragging) return; dragging=false; const deck=getDeck(); if(!deck) return; const back=()=>{ const r=deck.playbackRate; const nr=lerp(r,1,0.2); deck.setRate(nr); if(Math.abs(nr-1)>0.01) requestAnimationFrame(back); else deck.setRate(1); }; back(); edu.msg('Scratch end'); }
+  discEl.parentElement.addEventListener('mousedown',down); window.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
+  discEl.parentElement.addEventListener('touchstart',down,{passive:false}); window.addEventListener('touchmove',move,{passive:false}); window.addEventListener('touchend',up);
+}
+bindScratch($('#discA'),()=>deckA); bindScratch($('#discB'),()=>deckB);
 
-    // Equal-power crossfade law
-    function setCrossfader(x){
-      state.xf = x;
-      const a = Math.cos(x * 0.5 * Math.PI);
-      const b = Math.cos((1 - x) * 0.5 * Math.PI);
-      if(deckA?.gain) deckA.gain.gain.value = a*a;
-      if(deckB?.gain) deckB.gain.gain.value = b*b;
-      $('#xfLabel').textContent = x<0.45 ? 'Left' : x>0.55 ? 'Right' : 'Center';
-      edu.msg(`Crossfader set to ${x.toFixed(2)}. Equal-power law to avoid dips in the center.`);
-    }
+/* Pads (synth) */
+function trigKick(){ if(!audioCtx) initAudio(); const t=audioCtx.currentTime,o=audioCtx.createOscillator(),g=audioCtx.createGain(); o.type='sine'; o.frequency.setValueAtTime(140,t); o.frequency.exponentialRampToValueAtTime(50,t+0.15); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(1,t+0.005); g.gain.exponentialRampToValueAtTime(0.0001,t+0.3); o.connect(g).connect(padsGain); o.start(t); o.stop(t+0.35); }
+function trigSnare(){ const t=audioCtx.currentTime,buf=audioCtx.createBuffer(1,audioCtx.sampleRate*0.2,audioCtx.sampleRate),d=buf.getChannelData(0); for(let i=0;i>d.length;i++){} /* guard */ for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,2); const n=audioCtx.createBufferSource(); n.buffer=buf; const bp=audioCtx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1800; bp.Q.value=0.8; const g=audioCtx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.8,t+0.004); g.gain.exponentialRampToValueAtTime(0.0001,t+0.18); n.connect(bp).connect(g).connect(padsGain); n.start(t); n.stop(t+0.2); }
+function trigHat(){ const t=audioCtx.currentTime,buf=audioCtx.createBuffer(1,audioCtx.sampleRate*0.08,audioCtx.sampleRate),d=buf.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1); const n=audioCtx.createBufferSource(); n.buffer=buf; const hp=audioCtx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=6000; hp.Q.value=0.7; const g=audioCtx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.6,t+0.002); g.gain.exponentialRampToValueAtTime(0.0001,t+0.07); n.connect(hp).connect(g).connect(padsGain); n.start(t); n.stop(t+0.08); }
+function trigClap(){ trigSnare(); setTimeout(trigSnare,40); }
+function trigTom(){ const t=audioCtx.currentTime,o=audioCtx.createOscillator(),g=audioCtx.createGain(); o.type='sine'; o.frequency.setValueAtTime(180,t); o.frequency.exponentialRampToValueAtTime(90,t+0.3); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.7,t+0.01); g.gain.exponentialRampToValueAtTime(0.0001,t+0.32); o.connect(g).connect(padsGain); o.start(t); o.stop(t+0.34); }
+function trigFX(){ const t=audioCtx.currentTime,o=audioCtx.createOscillator(),g=audioCtx.createGain(),lp=audioCtx.createBiquadFilter(); o.type='sawtooth'; lp.type='lowpass'; lp.frequency.value=1200; lp.Q.value=10; o.frequency.setValueAtTime(200,t); o.frequency.exponentialRampToValueAtTime(20,t+1.0); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.6,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+1.0); o.connect(lp).connect(g).connect(padsGain); o.start(t); o.stop(t+1.05); }
+$$('.pad').forEach(p=>p.addEventListener('click',()=>{ if(!audioCtx) initAudio(); const w=p.dataset.pad; ({kick:trigKick,snare:trigSnare,hat:trigHat,clap:trigClap,tom:trigTom,fx:trigFX}[w]||trigFX)(); p.animate([{transform:'translateY(0)'},{transform:'translateY(2px)'}],{duration:90}); }));
 
-    function initAudioGraph(){
-      if(audioCtx) return;
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+/* User-recorded pads U1..U4 */
+const userSamples = {u1:null,u2:null,u3:null,u4:null};
+function playUserSample(key){
+  if(!audioCtx || !userSamples[key]) return;
+  const src=audioCtx.createBufferSource(); src.buffer=userSamples[key]; src.connect(padsGain); src.start();
+}
+['u1','u2','u3','u4'].forEach(id=>$('#'+id).addEventListener('click',()=>playUserSample(id)));
 
-      // Master bus
-      masterGain = audioCtx.createGain();
-      masterGain.gain.value = state.master;
+/* MediaRecorder → assign to pad */
+let mediaStream=null, mediaRecorder=null, recChunks=[];
+async function ensureMic(){
+  if(mediaStream) return;
+  try{ mediaStream = await navigator.mediaDevices.getUserMedia({audio:true}); }
+  catch(e){ $('#recStatus').textContent='Mic error: '+e.message; }
+}
+$('#recStart').addEventListener('click', async()=>{
+  initAudio(); await ensureMic(); if(!mediaStream){return;}
+  recChunks=[]; mediaRecorder = new MediaRecorder(mediaStream);
+  mediaRecorder.ondataavailable = e=>{ if(e.data.size>0) recChunks.push(e.data); };
+  mediaRecorder.start(); $('#recStatus').textContent='Recording...';
+  edu.msg('Recording started. Speak or make a sound.');
+});
+$('#recStop').addEventListener('click', ()=>{
+  if(mediaRecorder && mediaRecorder.state!=='inactive'){ mediaRecorder.stop(); $('#recStatus').textContent='Recording stopped. Click Assign to save to a pad.'; }
+});
+$('#recAssign').addEventListener('click', async()=>{
+  if(recChunks.length===0){ $('#recStatus').textContent='No audio recorded.'; return; }
+  const blob = new Blob(recChunks, {type: recChunks[0].type||'audio/webm'});
+  const arr = await blob.arrayBuffer();
+  if(!audioCtx) initAudio();
+  const buf = await audioCtx.decodeAudioData(arr);
+  const key = $('#recTarget').value;
+  userSamples[key]=buf;
+  const btn = $('#'+key); btn.querySelector('small').textContent='sample loaded';
+  $('#recStatus').textContent=`Assigned ${Math.round(buf.duration*100)/100}s to ${key.toUpperCase()}`;
+  edu.msg(`Recorder: assigned ${buf.duration.toFixed(2)}s to ${key.toUpperCase()}`);
+});
 
-      // Analyser after master for combined output
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = state.fftSize;
-      analyser.smoothingTimeConstant = state.smoothing;
-      state.spectrum = new Uint8Array(analyser.frequencyBinCount);
-      state.waveform = new Float32Array(analyser.fftSize);
+/* =============================
+   VISUALIZER (Three.js + Cannon)
+   ============================= */
+const canvas=$('#stage'), renderer=new THREE.WebGLRenderer({canvas,antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene=new THREE.Scene(); const camera=new THREE.PerspectiveCamera(60,1,0.1,1000); camera.position.set(0,16,26);
+const controls=new THREE.OrbitControls(camera,renderer.domElement); controls.enableDamping=true;
+scene.add(new THREE.HemisphereLight(0x88ccee,0x111122,0.8)); const dir=new THREE.DirectionalLight(0xffffff,0.6); dir.position.set(10,20,10); scene.add(dir);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(200,200), new THREE.MeshStandardMaterial({color:0x0b0d12,metalness:0.1,roughness:0.85})); ground.rotation.x=-Math.PI/2; scene.add(ground);
 
-      // Decks and pads
-      deckA = makeDeck();
-      deckB = makeDeck();
-      padsGain = audioCtx.createGain();
-      padsGain.gain.value = 0.9;
+/* City */
+const GRID=20, COUNT=GRID*GRID, dummy=new THREE.Object3D();
+const buildings=new THREE.InstancedMesh(new THREE.BoxGeometry(0.8,1,0.8), new THREE.MeshStandardMaterial({color:0x112033,metalness:0.3,roughness:0.4,emissive:0x071a2a,emissiveIntensity:0.4}), COUNT);
+let k=0; for(let i=0;i<GRID;i++){ for(let j=0;j<GRID;j++){ dummy.position.set((i-GRID/2)*1.2,0.5,(j-GRID/2)*1.2); dummy.scale.set(1,1,1); dummy.updateMatrix(); buildings.setMatrixAt(k++,dummy.matrix);} } buildings.instanceMatrix.needsUpdate=true; scene.add(buildings);
 
-      // Graph wiring
-      deckA.gain.connect(masterGain);
-      deckB.gain.connect(masterGain);
-      padsGain.connect(masterGain);
-      masterGain.connect(analyser);
-      analyser.connect(audioCtx.destination);
+/* FFT texture for shader */
+const FFTSZ=128, fftData=new Uint8Array(FFTSZ*4); const fftTex=new THREE.DataTexture(fftData,FFTSZ,1,THREE.RGBAFormat); fftTex.needsUpdate=true;
+const energyUniforms={uTime:{value:0},uFFT:{value:fftTex},uPulse:{value:0},uAmp:{value:0}};
+const energyMat=new THREE.ShaderMaterial({transparent:true,depthWrite:false,uniforms:energyUniforms,vertexShader:`varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,fragmentShader:`precision highp float;varying vec2 vUv;uniform sampler2D uFFT;uniform float uTime,uPulse,uAmp;float spec(float x){return texture2D(uFFT, vec2(x,0.5)).r;}void main(){float bass=spec(0.05),tre=spec(0.8);float glow=pow(1.0-distance(vUv,vec2(.5)),2.0);float wave=.5+.5*sin(10.0*vUv.x+uTime*2.0+bass*12.0);float pulse=uPulse*exp(-8.0*distance(vUv,vec2(.5,.55)));float val=glow*wave+pulse+.15*uAmp;vec3 col=mix(vec3(.02,.1,.18),vec3(0.0,0.9,1.0),val);col+=tre*vec3(.3,.1,.6);gl_FragColor=vec4(col,.35+.35*val);}`});
+const energyPlane=new THREE.Mesh(new THREE.PlaneGeometry(60,40),energyMat); energyPlane.position.set(0,8,-12); scene.add(energyPlane);
 
-      setCrossfader(state.xf);
-      edu.msg(`AudioContext initialized at ${audioCtx.sampleRate} Hz. Analyser fftSize=${state.fftSize}, smoothing=${state.smoothing}.`);
-    }
+/* Particles */
+const PCOUNT=300, pGeo=new THREE.BufferGeometry(); const positions=new Float32Array(PCOUNT*3), speeds=new Float32Array(PCOUNT);
+for(let i=0;i<PCOUNT;i++){ positions[i*3]=(Math.random()-.5)*16; positions[i*3+1]=Math.random()*8+1; positions[i*3+2]=(Math.random()-.5)*16; speeds[i]=Math.random()*0.02+0.005; }
+pGeo.setAttribute('position', new THREE.BufferAttribute(positions,3)); pGeo.setAttribute('speed', new THREE.BufferAttribute(speeds,1));
+const pMat=new THREE.ShaderMaterial({transparent:true,depthWrite:false,uniforms:{uTime:{value:0},uPulse:{value:0}},vertexShader:`attribute float speed;uniform float uTime,uPulse;varying float vL;void main(){vec3 p=position;p.y+=sin(uTime*2.0+p.x*.2+p.z*.1)*.2;p.x+=sin(uTime*speed+p.y*.3)*.1;p.z+=cos(uTime*speed+p.x*.2)*.1;p.xy*=(1.0+.3*uPulse);vL=speed;gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0);gl_PointSize=2.0+14.0*(.3+speed)*(1.0+.6*uPulse)/length(gl_Position.xyz);}`,fragmentShader:`precision highp float;varying float vL;uniform float uPulse;void main(){vec2 uv=gl_PointCoord-.5;float d=length(uv);float a=smoothstep(.5,0.,d);vec3 c=mix(vec3(0.,.6,1.),vec3(.7,.3,1.),vL*2.);c+=uPulse*vec3(.4,.4,.1);gl_FragColor=vec4(c,a);}`});
+const particles=new THREE.Points(pGeo,pMat); scene.add(particles);
 
-    $('#audioStart').addEventListener('click', async()=>{
-      initAudioGraph();
-      await audioCtx.resume();
-      state.started = true;
-      $('#audioStart').textContent='Audio Ready';
-      edu.msg('Audio ready. Load files or hit pads. Visuals now respond to master output.');
-    });
+/* Physics spheres pulsed by snare */
+const world=new CANNON.World(); world.gravity.set(0,-9.82,0);
+const groundBody=new CANNON.Body({mass:0,shape:new CANNON.Plane()}); groundBody.quaternion.setFromEuler(-Math.PI/2,0,0); world.addBody(groundBody);
+const sShape=new CANNON.Sphere(0.3); const phys=[]; function spawn(){ const b=new CANNON.Body({mass:1,shape:sShape}); b.position.set((Math.random()-.5)*6,4+Math.random()*2,(Math.random()-.5)*6); b.applyImpulse(new CANNON.Vec3((Math.random()-.5)*2,4,(Math.random()-.5)*2)); world.addBody(b); const m=new THREE.Mesh(new THREE.SphereGeometry(0.3,16,16), new THREE.MeshStandardMaterial({color:0x22ffee,emissive:0x114455,emissiveIntensity:0.6,metalness:0.2,roughness:0.3})); scene.add(m); phys.push({b,m,t:performance.now()}); if(phys.length>24){ const x=phys.shift(); world.remove(x.b); scene.remove(x.m);} }
 
-    // Deck abstraction
-    function makeDeck(){
-      const gain = audioCtx.createGain();
-      gain.gain.value = 0; // crossfader controls actual audible level
+/* Analysis and mapping */
+let pulseVal=0, lastSn=0, snAvg=0, snAvgSm=0;
+function analyse(){
+  if(!analyser) return {bass:0,mid:0,tre:0,amp:0};
+  analyser.getByteFrequencyData(state.spectrum);
+  analyser.getFloatTimeDomainData(state.waveform);
+  for(let i=0;i<FFTSZ;i++){ const v=state.spectrum[i]/255; const j=i*4; fftData[j]=Math.floor(v*255); fftData[j+3]=255; }
+  fftTex.needsUpdate=true;
+  const sr=audioCtx.sampleRate, nyq=sr/2, binHz=nyq/state.spectrum.length;
+  const band=(lo,hi)=>{ const i0=Math.max(0,Math.floor(lo/binHz)), i1=Math.min(state.spectrum.length-1,Math.ceil(hi/binHz)); let s=0,n=0; for(let i=i0;i<=i1;i++){s+=state.spectrum[i];n++;} return n? s/(n*255):0; };
+  const bass=band(20,200), mid=band(200,2000), tre=band(2000,8000), amp=(bass+mid+tre)/3;
+  const sn=band(2000,6000); snAvg=lerp(snAvg,sn,.05); snAvgSm=lerp(snAvgSm,snAvg,.05);
+  if(sn>(snAvgSm+0.12) && performance.now()-lastSn>100){ lastSn=performance.now(); pulse(1); spawn(); }
+  return {bass,mid,tre,amp};
+}
+function pulse(s=1){ pulseVal=Math.min(1.2, pulseVal+0.6*s); pMat.uniforms.uPulse.value=pulseVal; energyUniforms.uPulse.value=pulseVal; }
 
-      return {
-        buffer:null,
-        src:null,
-        gain,
-        isPlaying:false,
-        startedAt:0,   // audioCtx.currentTime when started
-        pausedAt:0,    // seconds into buffer when paused
-        playbackRate:1,
+/* Resize + render loop */
+function resize(){ const w=innerWidth,h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+addEventListener('resize',resize); resize();
 
-        async load(file){
-          const arr = await file.arrayBuffer();
-          this.buffer = await audioCtx.decodeAudioData(arr);
-          this.pausedAt = 0;
-          this.startedAt = 0;
-          edu.msg(`Loaded "${file.name}" (${(this.buffer.duration).toFixed(1)} s, ${this.buffer.numberOfChannels} ch).`);
-        },
-        _spawnSource(){
-          if(!this.buffer) return null;
-          const src = audioCtx.createBufferSource();
-          src.buffer = this.buffer;
-          src.loop = true; // DJ loops by default for demo
-          src.playbackRate.value = this.playbackRate;
-          src.connect(this.gain);
-          this.src = src;
-          return src;
-        },
-        play(){
-          if(!this.buffer) return;
-          if(this.isPlaying) return;
-          const src = this._spawnSource();
-          if(!src) return;
-          src.start(0, this.pausedAt % this.buffer.duration);
-          this.startedAt = audioCtx.currentTime - this.pausedAt / this.playbackRate;
-          this.isPlaying = true;
-          edu.msg('Deck started. Loop on. playbackRate=' + this.playbackRate.toFixed(2));
-        },
-        pause(){
-          if(this.src){
-            // compute current offset before stopping
-            const played = (audioCtx.currentTime - this.startedAt) * this.playbackRate;
-            this.pausedAt = (this.pausedAt + played) % (this.buffer?.duration || 0);
-            this.src.stop();
-            this.src.disconnect();
-            this.src = null;
-          }
-          this.isPlaying = false;
-          edu.msg('Deck paused.');
-        },
-        setRate(rate){
-          this.playbackRate = rate;
-          if(this.src){
-            this.src.playbackRate.setValueAtTime(rate, audioCtx.currentTime);
-          }
-        },
-        currentTime(){
-          if(!this.buffer) return 0;
-          if(!this.isPlaying) return this.pausedAt;
-          const played = (audioCtx.currentTime - this.startedAt) * this.playbackRate;
-          return (this.pausedAt + played) % this.buffer.duration;
-        }
-      };
-    }
+function updateCity(bass){
+  let i=0;
+  for(let x=0;x<GRID;x++){ for(let z=0;z<GRID;z++){ const dx=(x-GRID/2), dz=(z-GRID/2), dist=Math.sqrt(dx*dx+dz*dz)/GRID, h=0.6+10*bass*(1.2-dist); dummy.position.set((x-GRID/2)*1.2,h*0.5,(z-GRID/2)*1.2); dummy.scale.set(1,Math.max(.2,h),1); dummy.updateMatrix(); buildings.setMatrixAt(i++,dummy.matrix); } }
+  buildings.instanceMatrix.needsUpdate=true; buildings.material.emissiveIntensity=0.25+0.9*clamp(bass*2.5,0,1);
+}
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  const dt=(t-lastT)/1000; lastT=t;
+  const bands=analyse(); energyUniforms.uTime.value=t/1000; energyUniforms.uAmp.value=bands.amp||0;
+  pulseVal=Math.max(0, pulseVal-dt*1.8); pMat.uniforms.uTime.value=t/1000; pMat.uniforms.uPulse.value=pulseVal; energyUniforms.uPulse.value=pulseVal;
+  updateCity(bands.bass||0);
+  if(deckA) { const ct=deckA.currentTime(), dur=deckA.buffer?.duration||0; $('#deckATime').textContent=fmtTime(ct); $('#aElapsed').textContent=fmtTime(ct); $('#aRemain').textContent=dur?('-'+fmtTime(dur-ct)):'--:--'; }
+  if(deckB) { const ct=deckB.currentTime(), dur=deckB.buffer?.duration||0; $('#deckBTime').textContent=fmtTime(ct); $('#bElapsed').textContent=fmtTime(ct); $('#bRemain').textContent=dur?('-'+fmtTime(dur-ct)):'--:--'; }
+  world.step(1/60); for(const s of phys){ s.m.position.copy(s.b.position); s.m.quaternion.copy(s.b.quaternion); if(performance.now()-s.t>8000){ world.remove(s.b); scene.remove(s.m); } }
+  controls.update(); renderer.render(scene,camera);
+}
+requestAnimationFrame(loop);
 
-    // File inputs
-    $('#loadA').addEventListener('change', e=>{
-      const f = e.target.files[0];
-      if(!f) return;
-      initAudioGraph();
-      deckA.load(f);
-    });
-    $('#loadB').addEventListener('change', e=>{
-      const f = e.target.files[0];
-      if(!f) return;
-      initAudioGraph();
-      deckB.load(f);
-    });
+/* Disc auto spin when playing */
+function spin(){ const a=$('#discA'), b=$('#discB'); const f=()=>{ if(deckA?.isPlaying){ const r=parseFloat(a.dataset.rot||'0')+0.6; a.dataset.rot=r; a.style.transform=`rotate(${r}deg)`; } if(deckB?.isPlaying){ const r=parseFloat(b.dataset.rot||'0')+0.6; b.dataset.rot=r; b.style.transform=`rotate(${r}deg)`; } requestAnimationFrame(f); }; f(); }
+spin();
 
-    // Deck transport buttons
-    $('#playA').addEventListener('click', ()=>{initAudioGraph(); deckA.play();});
-    $('#pauseA').addEventListener('click', ()=>deckA.pause());
-    $('#playB').addEventListener('click', ()=>{initAudioGraph(); deckB.play();});
-    $('#pauseB').addEventListener('click', ()=>deckB.pause());
+/* Camera reset */
+$('#camReset').addEventListener('click',()=>{ camera.position.set(0,16,26); controls.target.set(0,0,0); controls.update(); });
 
-    // Master controls
-    $('#xfader').addEventListener('input', e=> setCrossfader(parseFloat(e.target.value)));
-    $('#masterVol').addEventListener('input', e=>{
-      const v = parseFloat(e.target.value);
-      state.master = v;
-      if(masterGain) masterGain.gain.value = v;
-      $('#volLabel').textContent = v.toFixed(2);
-      edu.msg(`Master volume set to ${v.toFixed(2)}.`);
-    });
-    $('#smoothing').addEventListener('input', e=>{
-      const v = parseFloat(e.target.value);
-      state.smoothing = v;
-      if(analyser) analyser.smoothingTimeConstant = v;
-      $('#smLabel').textContent = v.toFixed(2);
-      edu.msg(`Analyser smoothingTimeConstant set to ${v.toFixed(2)}. Higher smooths more, slower response.`);
-    });
-
-    /* ----------------------------
-       SCRATCHING
-       Mapping pointer motion on a disc to playbackRate.
-       We compute angular velocity around disc center.
-       ---------------------------- */
-    function bindScratch(discEl, deck){
-      let dragging=false;
-      let lastAngle=0;
-      let lastTime=0;
-
-      function getAngle(ev){
-        const rect = discEl.getBoundingClientRect();
-        const cx = rect.left + rect.width/2;
-        const cy = rect.top + rect.height/2;
-        const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - cx;
-        const y = (ev.touches ? ev.touches[0].clientY : ev.clientY) - cy;
-        return Math.atan2(y, x); // radians
-      }
-      function onDown(ev){
-        if(!state.started){ initAudioGraph(); }
-        dragging = true;
-        lastAngle = getAngle(ev);
-        lastTime = performance.now();
-        ev.preventDefault();
-        edu.msg('Scratch start. Drag around center to change playbackRate. Negative rate plays backward.');
-      }
-      function onMove(ev){
-        if(!dragging) return;
-        const a = getAngle(ev);
-        const now = performance.now();
-        const dt = (now - lastTime)/1000;
-        let da = a - lastAngle;
-        // Wrap to shortest path
-        if(da > Math.PI) da -= 2*Math.PI;
-        if(da < -Math.PI) da += 2*Math.PI;
-        // Angular velocity to rate mapping. Tuned constant.
-        const rate = clamp(da/dt * 0.25, -3.0, 3.0);
-        deck.setRate(rate);
-        // Rotate disc visually to reinforce movement
-        const currentRot = parseFloat(discEl.dataset.rot || '0');
-        const deg = currentRot + (da*180/Math.PI);
-        discEl.style.transform = `rotate(${deg}deg)`;
-        discEl.dataset.rot = deg;
-        lastAngle = a; lastTime = now;
-      }
-      function onUp(){
-        if(!dragging) return;
-        dragging = false;
-        // Spring back to normal rate
-        const back = ()=>{
-          const r = deck.playbackRate;
-          const target = 1.0;
-          const nr = lerp(r, target, 0.2);
-          deck.setRate(nr);
-          if(Math.abs(nr-target)>0.01) requestAnimationFrame(back);
-          else deck.setRate(1.0);
-        };
-        back();
-        edu.msg('Scratch end. playbackRate eased back to 1.0.');
-      }
-
-      discEl.parentElement.addEventListener('mousedown', onDown);
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-
-      discEl.parentElement.addEventListener('touchstart', onDown, {passive:false});
-      window.addEventListener('touchmove', onMove, {passive:false});
-      window.addEventListener('touchend', onUp);
-    }
-    bindScratch($('#discA'), deckA);
-    bindScratch($('#discB'), deckB);
-
-    /* ----------------------------
-       BEAT PADS
-       Pure Web Audio synthesis. Short percussive voices.
-       ---------------------------- */
-    function trigKick(){
-      if(!audioCtx) initAudioGraph();
-      const t0 = audioCtx.currentTime;
-      const o = audioCtx.createOscillator();
-      const g = audioCtx.createGain();
-      o.type='sine';
-      o.frequency.setValueAtTime(140, t0);
-      o.frequency.exponentialRampToValueAtTime(50, t0+0.15);
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(1.0, t0+0.005);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0+0.3);
-      o.connect(g).connect(padsGain);
-      o.start(t0); o.stop(t0+0.35);
-    }
-    function trigSnare(){
-      const t0 = audioCtx.currentTime;
-      // noise burst
-      const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate*0.2, audioCtx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for(let i=0;i<data.length;i++) data[i]=(Math.random()*2-1)*Math.pow(1-i/data.length, 2);
-      const n = audioCtx.createBufferSource(); n.buffer=buffer;
-      const band = audioCtx.createBiquadFilter(); band.type='bandpass'; band.frequency.value=1800; band.Q.value=0.8;
-      const g = audioCtx.createGain();
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.8, t0+0.004);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0+0.18);
-      n.connect(band).connect(g).connect(padsGain);
-      n.start(t0); n.stop(t0+0.2);
-      // add body
-      const o = audioCtx.createOscillator(); o.type='triangle';
-      const og = audioCtx.createGain();
-      o.frequency.setValueAtTime(200, t0);
-      og.gain.setValueAtTime(0.0001, t0);
-      og.gain.exponentialRampToValueAtTime(0.4, t0+0.006);
-      og.gain.exponentialRampToValueAtTime(0.0001, t0+0.12);
-      o.connect(og).connect(padsGain);
-      o.start(t0); o.stop(t0+0.14);
-    }
-    function trigHat(){
-      const t0 = audioCtx.currentTime;
-      const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate*0.08, audioCtx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for(let i=0;i<data.length;i++) data[i]=(Math.random()*2-1);
-      const n = audioCtx.createBufferSource(); n.buffer=buffer;
-      const hp = audioCtx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=6000; hp.Q.value=0.7;
-      const g = audioCtx.createGain();
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.6, t0+0.002);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0+0.07);
-      n.connect(hp).connect(g).connect(padsGain);
-      n.start(t0); n.stop(t0+0.08);
-    }
-    function trigClap(){ trigSnare(); setTimeout(trigSnare, 40); }
-    function trigTom(){
-      const t0 = audioCtx.currentTime;
-      const o = audioCtx.createOscillator(); o.type='sine';
-      const g = audioCtx.createGain();
-      o.frequency.setValueAtTime(180, t0);
-      o.frequency.exponentialRampToValueAtTime(90, t0+0.3);
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.7, t0+0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0+0.32);
-      o.connect(g).connect(padsGain);
-      o.start(t0); o.stop(t0+0.34);
-    }
-    function trigFX(){
-      const t0 = audioCtx.currentTime;
-      const o = audioCtx.createOscillator(); o.type='sawtooth';
-      const g = audioCtx.createGain();
-      const lp = audioCtx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1200; lp.Q.value=10;
-      o.frequency.setValueAtTime(200, t0);
-      o.frequency.exponentialRampToValueAtTime(20, t0+1.0);
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.6, t0+0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0+1.0);
-      o.connect(lp).connect(g).connect(padsGain);
-      o.start(t0); o.stop(t0+1.05);
-    }
-
-    $$('.pad').forEach(p=>{
-      p.addEventListener('click', ()=>{
-        if(!audioCtx) initAudioGraph();
-        const which=p.dataset.pad;
-        if(which==='kick') trigKick();
-        else if(which==='snare') { trigSnare(); pulse(0.9); }
-        else if(which==='hat') trigHat();
-        else if(which==='clap') trigClap();
-        else if(which==='tom') trigTom();
-        else trigFX();
-        p.animate([{transform:'translateY(0)'},{transform:'translateY(2px)'}], {duration:90});
-        edu.msg(`Pad "${which}" fired. This sound also feeds analyser for visuals.`);
-      });
-    });
-
-    /* ----------------------------
-       THREE.JS VISUALIZER
-       City grid that responds to bass.
-       Shader energy field and audio-reactive particles.
-       Snare pulses kick physics spheres via Cannon.js.
-       ---------------------------- */
-    const canvas = $('#stage');
-    const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
-    camera.position.set(0, 16, 26);
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-
-    // Lights
-    const hemi = new THREE.HemisphereLight(0x88ccee, 0x111122, 0.8);
-    const dir = new THREE.DirectionalLight(0xffffff, 0.6);
-    dir.position.set(10,20,10);
-    scene.add(hemi, dir);
-
-    // Ground plane
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(200,200,1,1),
-      new THREE.MeshStandardMaterial({color:0x0b0d12, metalness:0.1, roughness:0.85})
-    );
-    ground.rotation.x = -Math.PI/2;
-    scene.add(ground);
-
-    // City buildings as InstancedMesh for performance
-    const GRID = 20;                     // 20x20 grid
-    const COUNT = GRID*GRID;
-    const dummy = new THREE.Object3D();
-    const boxGeo = new THREE.BoxGeometry(0.8, 1, 0.8);
-    const boxMat = new THREE.MeshStandardMaterial({
-      color:0x112033, metalness:0.3, roughness:0.4, emissive:0x071a2a, emissiveIntensity:0.4
-    });
-    const buildings = new THREE.InstancedMesh(boxGeo, boxMat, COUNT);
-    let idx=0;
-    for(let ix=0; ix<GRID; ix++){
-      for(let iz=0; iz<GRID; iz++){
-        const x = (ix - GRID/2) * 1.2;
-        const z = (iz - GRID/2) * 1.2;
-        dummy.position.set(x, 0.5, z);
-        dummy.scale.set(1, 1, 1);
-        dummy.updateMatrix();
-        buildings.setMatrixAt(idx++, dummy.matrix);
-      }
-    }
-    buildings.instanceMatrix.needsUpdate = true;
-    scene.add(buildings);
-
-    // Audio data as DataTexture for shader usage
-    const FFT_TEX_SIZE = 128; // we will pack first 128 bins
-    const fftData = new Uint8Array(FFT_TEX_SIZE*4); // RGBA
-    const fftTex = new THREE.DataTexture(fftData, FFT_TEX_SIZE, 1, THREE.RGBAFormat);
-    fftTex.needsUpdate = true;
-
-    // Energy field shader plane behind city
-    const energyUniforms = {
-      uTime: {value:0},
-      uFFT: {value:fftTex},
-      uPulse: {value:0},   // snare pulse
-      uAmp: {value:0}      // overall amplitude
-    };
-    const energyMat = new THREE.ShaderMaterial({
-      transparent:true,
-      depthWrite:false,
-      uniforms: energyUniforms,
-      vertexShader: `
-        varying vec2 vUv;
-        void main(){
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-        }
-      `,
-      fragmentShader: `
-        precision highp float;
-        varying vec2 vUv;
-        uniform sampler2D uFFT;
-        uniform float uTime;
-        uniform float uPulse;
-        uniform float uAmp;
-
-        // sample normalized spectrum value 0..1 at x in 0..1
-        float spec(float x){
-          vec2 uv = vec2(x, 0.5);
-          return texture2D(uFFT, uv).r;
-        }
-        void main(){
-          // radial field with waves modulated by bass and treble
-          float bass = spec(0.05);
-          float treble = spec(0.8);
-          float glow = pow(1.0 - distance(vUv, vec2(0.5)), 2.0);
-          float wave = 0.5 + 0.5*sin(10.0*vUv.x + uTime*2.0 + bass*12.0);
-          float pulse = uPulse * exp(-8.0*distance(vUv, vec2(0.5,0.55)));
-          float val = glow*wave + pulse + 0.15*uAmp;
-
-          vec3 col = mix(vec3(0.02,0.1,0.18), vec3(0.0,0.9,1.0), val);
-          col += treble*vec3(0.3,0.1,0.6);
-
-          gl_FragColor = vec4(col, 0.35 + 0.35*val);
-        }
-      `
-    });
-    const energyPlane = new THREE.Mesh(new THREE.PlaneGeometry(60,40), energyMat);
-    energyPlane.position.set(0,8,-12);
-    scene.add(energyPlane);
-
-    // Particle system that pops on snares
-    const PCOUNT = 300;
-    const pGeo = new THREE.BufferGeometry();
-    const positions = new Float32Array(PCOUNT*3);
-    const speeds = new Float32Array(PCOUNT);
-    for(let i=0;i<PCOUNT;i++){
-      positions[i*3+0] = (Math.random()-0.5)*16;
-      positions[i*3+1] = Math.random()*8+1;
-      positions[i*3+2] = (Math.random()-0.5)*16;
-      speeds[i] = Math.random()*0.02+0.005;
-    }
-    pGeo.setAttribute('position', new THREE.BufferAttribute(positions,3));
-    pGeo.setAttribute('speed', new THREE.BufferAttribute(speeds,1));
-    const pMat = new THREE.ShaderMaterial({
-      transparent:true,
-      depthWrite:false,
-      uniforms:{
-        uTime:{value:0},
-        uPulse:{value:0}
-      },
-      vertexShader: `
-        attribute float speed;
-        uniform float uTime;
-        uniform float uPulse;
-        varying float vL;
-        void main(){
-          vec3 pos = position;
-          pos.y += sin(uTime*2.0 + pos.x*0.2 + pos.z*0.1)*0.2;
-          pos.x += sin(uTime*speed + pos.y*0.3)*0.1;
-          pos.z += cos(uTime*speed + pos.x*0.2)*0.1;
-          // pulse pushes outward
-          pos.xy *= (1.0 + 0.3*uPulse);
-          vL = speed;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos,1.0);
-          gl_PointSize = 2.0 + 14.0*(0.3+speed) * (1.0 + 0.6*uPulse) / length(gl_Position.xyz);
-        }
-      `,
-      fragmentShader: `
-        precision highp float;
-        varying float vL;
-        uniform float uPulse;
-        void main(){
-          vec2 uv = gl_PointCoord - 0.5;
-          float d = length(uv);
-          float alpha = smoothstep(0.5, 0.0, d);
-          vec3 c = mix(vec3(0.0,0.6,1.0), vec3(0.7,0.3,1.0), vL*2.0);
-          c += uPulse*vec3(0.4,0.4,0.1);
-          gl_FragColor = vec4(c, alpha);
-        }
-      `
-    });
-    const particles = new THREE.Points(pGeo, pMat);
-    scene.add(particles);
-
-    // Physics spheres that pop on snares
-    const world = new CANNON.World();
-    world.gravity.set(0,-9.82,0);
-    const groundBody = new CANNON.Body({mass:0, shape:new CANNON.Plane()});
-    groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
-    world.addBody(groundBody);
-    const sphereShape = new CANNON.Sphere(0.3);
-    const physSpheres = []; // { body, mesh }
-    function spawnSphere(){
-      const body = new CANNON.Body({mass:1, shape:sphereShape});
-      body.position.set((Math.random()-0.5)*6, 4+Math.random()*2, (Math.random()-0.5)*6);
-      body.applyImpulse(new CANNON.Vec3((Math.random()-0.5)*2, 4, (Math.random()-0.5)*2));
-      world.addBody(body);
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16),
-        new THREE.MeshStandardMaterial({color:0x22ffee, emissive:0x114455, emissiveIntensity:0.6, metalness:0.2, roughness:0.3}));
-      scene.add(mesh);
-      physSpheres.push({body, mesh, born: performance.now()});
-      if(physSpheres.length>24){
-        const s = physSpheres.shift();
-        world.remove(s.body);
-        scene.remove(s.mesh);
-      }
-    }
-
-    // Resize
-    function resize(){
-      const w = window.innerWidth, h = window.innerHeight;
-      renderer.setSize(w, h, false);
-      camera.aspect = w/h; camera.updateProjectionMatrix();
-    }
-    window.addEventListener('resize', resize);
-    resize();
-
-    $('#camReset').addEventListener('click', ()=>{
-      camera.position.set(0,16,26);
-      controls.target.set(0,0,0);
-      controls.update();
-    });
-
-    /* ----------------------------
-       ANALYSIS → VISUAL MAPPING
-       We compute:
-       - bass energy: bins ~20..200 Hz
-       - mid energy: bins ~200..2000 Hz
-       - treble energy: bins ~2k..8k Hz
-       We also detect snare peaks by a simple energy threshold in 2k..6k Hz band.
-       ---------------------------- */
-    let pulseValue = 0; // decays every frame
-    let lastSnareEnergy = 0;
-    let snareAvg = 0, snareAvgSmooth = 0;
-
-    function updateAnalysis(){
-      if(!analyser) return {bass:0, mid:0, treble:0, amp:0};
-      analyser.getByteFrequencyData(state.spectrum);
-      analyser.getFloatTimeDomainData(state.waveform);
-
-      // update FFT data texture (pack first 128 bins into RGBA)
-      for(let i=0;i<FFT_TEX_SIZE;i++){
-        const v = state.spectrum[i] / 255; // 0..1
-        const j = i*4;
-        fftData[j+0] = Math.floor(v*255);
-        fftData[j+1] = 0;
-        fftData[j+2] = 0;
-        fftData[j+3] = 255;
-      }
-      fftTex.needsUpdate = true;
-
-      const sr = audioCtx.sampleRate;
-      const nyq = sr/2;
-      const binHz = nyq / state.spectrum.length;
-      const sumBand = (lo,hi)=>{
-        const i0 = Math.max(0, Math.floor(lo/binHz));
-        const i1 = Math.min(state.spectrum.length-1, Math.ceil(hi/binHz));
-        let s=0, n=0;
-        for(let i=i0;i<=i1;i++){s+=state.spectrum[i]; n++;}
-        return n? s/(n*255) : 0;
-      };
-      const bass = sumBand(20,200);
-      const mid = sumBand(200,2000);
-      const treble = sumBand(2000,8000);
-      const amp = (bass+mid+treble)/3;
-
-      // naive snare detection in 2k..6k
-      const sn = sumBand(2000,6000);
-      snareAvg = lerp(snareAvg, sn, 0.05);
-      snareAvgSmooth = lerp(snareAvgSmooth, snareAvg, 0.05);
-      const isHit = sn > (snareAvgSmooth + 0.12);
-      if(isHit && (performance.now() - lastSnareEnergy > 100)){
-        lastSnareEnergy = performance.now();
-        pulse(1.0);
-        spawnSphere();
-      }
-
-      return {bass, mid, treble, amp};
-    }
-
-    // external pulse trigger for pads and detection
-    function pulse(strength=1){
-      pulseValue = Math.min(1.2, pulseValue + 0.6*strength);
-      pMat.uniforms.uPulse.value = pulseValue;
-      energyUniforms.uPulse.value = pulseValue;
-      edu.msg('Pulse triggered. Shader uniforms boosted for particles and energy field.');
-    }
-
-    // City building update per frame
-    function updateCity(bass){
-      // Map bass energy to height. Also add small ripple by center distance.
-      let i=0;
-      for(let ix=0; ix<GRID; ix++){
-        for(let iz=0; iz<GRID; iz++){
-          const x = (ix - GRID/2);
-          const z = (iz - GRID/2);
-          const dist = Math.sqrt(x*x+z*z)/GRID;
-          const h = 0.6 + 10.0 * bass * (1.2 - dist); // taller near center
-          dummy.position.set((ix - GRID/2) * 1.2, h*0.5, (iz - GRID/2) * 1.2);
-          dummy.scale.set(1, Math.max(0.2, h), 1);
-          dummy.updateMatrix();
-          buildings.setMatrixAt(i++, dummy.matrix);
-        }
-      }
-      buildings.instanceMatrix.needsUpdate = true;
-      const e = clamp(bass*2.5, 0, 1);
-      buildings.material.emissiveIntensity = 0.25 + 0.9*e;
-    }
-
-    /* ----------------------------
-       MAIN LOOP
-       ---------------------------- */
-    let lastT = 0;
-    function tick(t){
-      requestAnimationFrame(tick);
-      const dt = (t - lastT)/1000; lastT = t;
-
-      // update audio analysis
-      const bands = updateAnalysis();
-      energyUniforms.uTime.value = t/1000;
-      energyUniforms.uAmp.value = bands?.amp || 0;
-
-      // decay pulses
-      pulseValue = Math.max(0, pulseValue - dt*1.8);
-      pMat.uniforms.uTime.value = t/1000;
-      pMat.uniforms.uPulse.value = pulseValue;
-      energyUniforms.uPulse.value = pulseValue;
-
-      // update city based on bass
-      updateCity(bands?.bass || 0);
-
-      // update deck time displays
-      if(deckA) $('#deckATime').textContent = fmtTime(deckA.currentTime());
-      if(deckB) $('#deckBTime').textContent = fmtTime(deckB.currentTime());
-
-      // physics step
-      world.step(1/60);
-      for(const s of physSpheres){
-        s.mesh.position.copy(s.body.position);
-        s.mesh.quaternion.copy(s.body.quaternion);
-        // remove after 8 seconds
-        if(performance.now()-s.born>8000){
-          world.remove(s.body); scene.remove(s.mesh);
-        }
-      }
-
-      controls.update();
-      renderer.render(scene, camera);
-    }
-    requestAnimationFrame(tick);
-
-    /* ----------------------------
-       DISC AUTO ROTATION WHEN PLAYING
-       purely visual. Separate from scratch transform.
-       ---------------------------- */
-    function spinDiscs(){
-      const dA = $('#discA'), dB = $('#discB');
-      const loop = ()=>{
-        const base = performance.now()*0.03;
-        if(deckA?.isPlaying){
-          const rotA = parseFloat(dA.dataset.rot || '0');
-          dA.dataset.rot = rotA + 0.6;
-          dA.style.transform = `rotate(${dA.dataset.rot}deg)`;
-        }
-        if(deckB?.isPlaying){
-          const rotB = parseFloat(dB.dataset.rot || '0');
-          dB.dataset.rot = rotB + 0.6;
-          dB.style.transform = `rotate(${dB.dataset.rot}deg)`;
-        }
-        requestAnimationFrame(loop);
-      };
-      loop();
-    }
-    spinDiscs();
-
-    /* ----------------------------
-       RECORDER STUB
-       A real in-browser recorder would use MediaRecorder fed by an offline or live node.
-       Here we mark as not supported in single file demo to keep scope clean.
-       ---------------------------- */
-    $('#recNotSupported').addEventListener('click', (e)=>{
-      e.preventDefault();
-      alert('Recording not included in this single-file demo. Use MediaRecorder on the master bus in your own build.');
-    });
-
-    /* ----------------------------
-       INITIAL EDU NOTES
-       ---------------------------- */
-    edu.msg('Scratching changes playbackRate in real time. Negative rate plays backward. Returning to 1.0 restores normal speed.');
-    edu.msg('City height maps bass energy. Particles and spheres pulse on snare hits detected near 2–6 kHz.');
-  </script>
+/* Start labels init */
+$('#aPitch').textContent='+0.00%'; $('#aRate').textContent='1.00x';
+$('#bPitch').textContent='+0.00%'; $('#bRate').textContent='1.00x';
+</script>
 </body>
 </html>
